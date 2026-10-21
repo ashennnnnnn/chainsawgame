@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#160f25">
+<title>Bunny Chainsaw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#100b19;--panel:#20162e;--line:#80639f;--pink:#ffc1e6;--purple:#c9b5ff;--text:#fff7ff;--muted:#c6b6d7}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0%,#352044 0%,var(--bg) 65%);color:var(--text);font-family:"DM Sans",system-ui,sans-serif;display:flex;justify-content:center;padding:24px}
+main{width:min(1100px,100%)}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:0 0 18px}
+.brand{display:flex;align-items:center;gap:14px}
+.mark{display:grid;place-items:center;width:52px;height:52px;border:1px solid #a98acb;background:linear-gradient(145deg,#3c2856,#1b1229);border-radius:15px;font-size:27px;box-shadow:0 6px 20px #0004}
+h1{font-family:"Press Start 2P",monospace;font-size:clamp(16px,2.4vw,24px);line-height:1.5;margin:0;letter-spacing:-.05em}
+.kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:800;margin-top:4px}
+.pill{border:1px solid #654c7d;background:#21162f;border-radius:999px;padding:9px 13px;font-size:12px;color:#eadbff;white-space:nowrap}
+.shell{border:1px solid #8866a7;background:#20162b;padding:8px;border-radius:16px;box-shadow:0 24px 70px #0008,0 0 0 4px #2c1f3a}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#20162b;border-radius:9px;image-rendering:pixelated}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:15px 2px 0}
+.actions{display:flex;gap:9px;flex-wrap:wrap}
+button{border:1px solid #e2a9d2;border-bottom-width:3px;background:linear-gradient(#ffd7ef,#ffb8e1);color:#28172f;border-radius:10px;padding:12px 16px;font:800 13px "DM Sans",sans-serif;cursor:pointer;transition:transform .12s,filter .12s}
+button:hover{filter:brightness(1.07);transform:translateY(-1px)}
+button.secondary{background:linear-gradient(#e5dcff,#c8b5ff);border-color:#a99ad5}
+button:focus-visible{outline:3px solid white;outline-offset:3px}
+#status{font-size:12px;color:#d6c8e6;min-height:18px}
+.help{color:#b9a8ca;font-size:12px;line-height:1.6;margin:13px 3px 0}
+kbd{font:700 11px "DM Sans",sans-serif;background:#2b2038;border:1px solid #5e4974;border-radius:5px;padding:2px 6px;color:#fff}
+@media(max-width:620px){body{padding:12px}.pill{display:none}.shell{padding:5px;border-radius:11px}.toolbar{align-items:flex-start}button{padding:11px 12px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div class="brand"><div class="mark">🐰</div><div><h1>Bunny Chainsaw</h1><div class="kicker">A tiny retro survival game</div></div></div>
+  <div class="pill">A little game made with love ♥</div>
+</header>
+<div class="shell"><canvas id="game" width="960" height="540" aria-label="Bunny Chainsaw game"></canvas></div>
+<div class="toolbar">
+  <div class="actions">
+    <button id="play">▶ Play</button>
+    <button id="sound" class="secondary">♫ Sound: On</button>
+    <button id="restart" class="secondary">↻ Restart</button>
+  </div>
+  <div id="status" aria-live="polite">Ready when you are.</div>
+</div>
+<p class="help">Move with <kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd>. Jump with <kbd>SPACE</kbd>. The chainsaw works automatically when enemies get close.</p>
+</main>
+<script>
+(()=>{
+'use strict';
+const canvas=document.querySelector('#game'),ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height;
+const assets={hero:new Image(),zombie:new Image(),max:new Image(),room:new Image(),winner:new Image()};
+assets.hero.src='assets/hero.png';
+assets.zombie.src='assets/zombie.png';
+assets.max.src='assets/max-zombie.png';
+assets.room.src='assets/room.png';
+assets.winner.src='assets/winner-screen.png';
+const $=s=>document.querySelector(s);
+const floorY=442;
+let running=false,gameOver=false,won=false,score=0,hp=100,px=210,py=0,jumpV=0,frame=0,lastSpawn=0,phase=0,hitCooldown=0,soundOn=true,audio=null,musicTimer=null,note=0;
+let zombies=[],keys={},touch={left:false,right:false};
+const normalTune=[262,330,392,330,294,349,440,349,262,330,392,523,440,392,330,294];
+const maxTune=[392,392,523,659,587,523,440,392,523,523,659,784,698,659,587,523];
+function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h)}
+function txt(t,x,y,size=16,color='#fff',align='left',font='700'){ctx.fillStyle=color;ctx.textAlign=align;ctx.font=`${font} ${size}px "DM Sans",system-ui,sans-serif`;ctx.fillText(t,x,y)}
+function beep(freq,dur=.08,type='square',vol=.025){if(!audio||!soundOn)return;const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(vol,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+dur);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+dur)}
+function startMusic(){if(!soundOn)return;try{audio=audio||new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();if(!musicTimer)musicTimer=setInterval(()=>{if(running){const seq=phase?maxTune:normalTune;beep(seq[note++%seq.length],phase?.13:.1,'square',phase?.035:.022)}},155)}catch(e){}}
+function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null}}
+function background(){
+  rect(0,0,W,H,'#21162c');
+  if(assets.room.complete&&assets.room.naturalWidth){
+    // Use the supplied bedroom artwork as the room's backdrop, preserving its wide composition.
+    ctx.drawImage(assets.room,0,65,W,340);
+    rect(0,0,W,68,'#160f25');
+    rect(0,405,W,135,'#25172f');
+    // Match the illustrated floor palette while keeping a clear play lane.
+    rect(0,floorY-7,W,7,'#b87da9');rect(0,floorY,W,4,'#e0a6d2');
+    for(let x=0;x<W;x+=48){rect(x, floorY+4,1,H-floorY,'#5a3d61');rect(x+10,floorY+29,25,3,'#3d2948')}
+  }else{
+    for(let x=0;x<W;x+=48){rect(x,0,1,H,'#30223d');rect(0,x,W,1,'#30223d')}
+    rect(0,floorY,W,H-floorY,'#43304b');rect(0,floorY-7,W,7,'#b87da9')
+  }
+}
+function drawHero(){
+  const im=assets.hero;
+  // Character is drawn from a single packed asset; feet stay anchored to the floor even mid-jump.
+  const h=188,w=im.naturalWidth? h*im.naturalWidth/im.naturalHeight:128;
+  const x=px-w*.35,y=floorY-h+12-py;
+  if(im.complete&&im.naturalWidth)ctx.drawImage(im,x,y,w,h);
+  else {rect(px+22,y+45,34,40,'#e4dce4');rect(px+27,y+12,30,30,'#b9785f');rect(px+22,y+1,40,18,'#211727');rect(px+14,y+82,20,23,'#20284b');rect(px+38,y+82,21,23,'#20284b');rect(px+54,y+53,49,14,'#d9dce9')}
+}
+function drawZombie(z){
+  const im=z.max?assets.max:assets.zombie;
+  const h=z.max?145:132,w=im.naturalWidth?h*im.naturalWidth/im.naturalHeight:95;
+  const y=floorY-h+10+Math.sin(frame/8+z.wobble)*2;
+  ctx.save();
+  if(z.dir<0){ctx.translate(z.x+w,y);ctx.scale(-1,1);if(im.complete&&im.naturalWidth)ctx.drawImage(im,0,0,w,h);else fallbackZombie(0,0,z.max)}
+  else if(im.complete&&im.naturalWidth)ctx.drawImage(im,z.x,y,w,h);else fallbackZombie(z.x,y,z.max);
+  ctx.restore();
+}
+function fallbackZombie(x,y,max){rect(x+10,y+20,35,40,max?'#183064':'#3b3947');rect(x+8,y+8,36,30,'#8da58b');rect(x+6,y+4,39,16,max?'#182958':'#292332');rect(x+15,y+18,5,5,'#ff4b63');rect(x+31,y+18,5,5,'#ff4b63');rect(x+7,y+57,18,31,'#292238');rect(x+28,y+57,18,31,'#292238')}
+function hud(){
+  rect(18,16,272,48,'#160f25e8');txt('HEALTH',32,45,14,'#e9d9f5');rect(112,30,160,15,'#4c344f');rect(112,30,160*hp/100,15,hp>32?'#ff6baa':'#ff415d');
+  rect(735,16,207,48,'#160f25e8');txt('KILLS',752,45,14,'#e9d9f5');txt(String(score).padStart(2,'0'),914,47,22,'#ffd3ee','right');
+  if(phase)txt('MAX HORDE',W/2,91,15,'#ffe27a','center');
+}
+function panel(title,line1,line2){
+  rect(0,0,W,H,'#10091dcc');rect(172,153,616,230,'#21152f');ctx.strokeStyle='#d6a0d4';ctx.lineWidth=3;ctx.strokeRect(174,155,612,226);
+  txt(title,W/2,218,25,'#ffd2ed','center','800');txt(line1,W/2,263,15,'#fff','center');txt(line2,W/2,313,14,'#ffdc7d','center');
+}
+function draw(){
+  background();
+  zombies.forEach(drawZombie);drawHero();hud();
+  if(!running&&!gameOver&&!won)panel('BUNNY CHAINSAW','A little adventure is waiting.','PRESS PLAY TO BEGIN');
+  if(gameOver)panel('TRY AGAIN','The horde got you this time.','PRESS RESTART TO PLAY AGAIN');
+  if(won){
+    if(assets.winner.complete&&assets.winner.naturalWidth){
+      rect(0,0,W,H,'#0b0714e8');
+      const ratio=Math.min(W/assets.winner.naturalWidth,H/assets.winner.naturalHeight);
+      const w=assets.winner.naturalWidth*ratio,h=assets.winner.naturalHeight*ratio;
+      ctx.drawImage(assets.winner,(W-w)/2,(H-h)/2,w,h);
+    }else panel('CONGRATULATIONS!','50 KILLS — YOU BEAT THE HORDE!','♥ YOUR PRIZE: A PRIVATE CONCERT ♥');
+  }
+}
+function reset(){running=false;gameOver=false;won=false;score=0;hp=100;px=210;py=0;jumpV=0;frame=0;lastSpawn=0;phase=0;hitCooldown=0;zombies=[];draw();$('#status').textContent='Ready when you are.'}
+function start(){if(gameOver||won)return;running=true;startMusic();$('#status').textContent='';requestAnimationFrame(tick)}
+function spawn(){const fromLeft=Math.random()<.5;zombies.push({x:fromLeft?-65:W+20,dir:fromLeft?1:-1,wobble:Math.random()*10,speed:.65+Math.random()*.35+score*.006,max:phase===1})}
+function tick(){
+ if(!running)return;frame++;
+ if(keys.ArrowLeft||keys.a||keys.A||touch.left)px-=3.4;
+ if(keys.ArrowRight||keys.d||keys.D||touch.right)px+=3.4;
+ px=Math.max(15,Math.min(W-115,px));
+ if(py>0||jumpV!==0){py+=jumpV;jumpV-=.58;if(py<=0){py=0;jumpV=0}}
+ const interval=Math.max(37,142-Math.floor(score*2.05));
+ if(frame-lastSpawn>interval){spawn();lastSpawn=frame;if(score>8&&Math.random()<.22)spawn()}
+ for(let i=zombies.length-1;i>=0;i--){
+   const z=zombies[i],target=px+54,dist=target-z.x;
+   z.dir=dist>0?1:-1;z.x+=z.dir*z.speed;
+   if(Math.abs(dist)<47&&py<24&&frame%30===0){hp-=8;hitCooldown=10;beep(105,.11,'sawtooth',.035)}
+   // The chainsaw's reach covers both sides, especially during a jump.
+   if((Math.abs(z.x-target)<70||(py>24&&Math.abs(z.x-(px+15))<72))&&frame%11===0){score++;zombies.splice(i,1);beep(520,.045,'square',.02);continue}
+   if(z.x<-100||z.x>W+100)zombies.splice(i,1);
+ }
+ if(score>=33&&phase===0){phase=1;zombies.forEach(z=>z.max=true);stopMusic();startMusic();beep(784,.22,'square',.05);setTimeout(()=>beep(988,.25,'square',.05),150)}
+ if(hp<=0){hp=0;gameOver=true;running=false;stopMusic()}
+ if(score>=50){score=50;won=true;running=false;stopMusic();beep(784,.2,'square',.05);setTimeout(()=>beep(988,.3,'square',.05),170)}
+ draw();if(running)requestAnimationFrame(tick)
+}
+$('#play').addEventListener('click',start);
+$('#restart').addEventListener('click',()=>{stopMusic();reset();start()});
+$('#sound').addEventListener('click',()=>{soundOn=!soundOn;$('#sound').textContent='♫ Sound: '+(soundOn?'On':'Off');if(!soundOn)stopMusic();else if(running)startMusic()});
+addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.code==='Space'&&py===0&&jumpV===0)jumpV=10.5;if(e.code==='Space'&&!running&&!gameOver&&!won)start()});
+addEventListener('keyup',e=>keys[e.key]=false);
+draw();
+})();
+</script>
+</body>
+</html>
